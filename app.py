@@ -1,20 +1,40 @@
 import streamlit as st
 import pdfplumber
 from openai import OpenAI
-import requests
 from dotenv import load_dotenv
 import os
+from chunk import chunk_text
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
 
 load_dotenv()
+
+# load the model acvoid re-loading the model every time
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+embed_model = load_model()
+
+# process the pdf
+@st.cache_data
+def process_pdf(text):
+    chunks = chunk_text(text)
+    embeddings = embed_model.encode(chunks)
+    return chunks, embeddings
+
 client = OpenAI(
-    api_key=os.getenv("Hugging_Face_API_KEY"),
+    api_key=os.getenv("HUGGING_FACE_API_KEY"),
     base_url="https://router.huggingface.co/v1"
 )
+
+
 
 # use the upload box from streamlit
 upload_file = st.file_uploader("Upload a PDF", type="pdf")
 
 text = ""
+relevant_chunks = []
 if upload_file :
     st.write("File uploaded successfully")
     # use padfplumber to read the pdf
@@ -22,7 +42,7 @@ if upload_file :
         for page in pdf.pages:
             page_text = page.extract_text()
             if page_text:
-                text += page.extract_text()
+                text += page_text
                 
     st.write("PDF Preview:")
     st.write(text[:1000])
@@ -32,17 +52,34 @@ question = st.text_input("Ask a question")
 if question:
     st.write("Your question:", question)
 
+
+
+
 if question and text:
+    # chunking operation
+    # chunks = chunk_text(text)
+    # embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    # chunk_embeddings = embed_model.encode(chunks)
+    chunks, chunk_embeddings = process_pdf(text)
+
+    dimension = chunk_embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(np.array(chunk_embeddings))
+    question_embedding = embed_model.encode([question])
+    distances, indices = index.search(np.array(question_embedding), k=3)
+    relevant_chunks = [chunks[i] for i in indices[0]]
+
     prompt = f"""
     Based on the PDF content below:
 
-    {text[:3000]}
+    {' '.join(relevant_chunks)}
 
     Answer this question:
     {question}
     """
     response = client.chat.completions.create(
-    model="Qwen/Qwen3.5-9B:together",
+    # model="Qwen/Qwen3.5-9B:together",
+    model="Qwen/Qwen2.5-7B-Instruct",
     messages=[
         {
             "role": "user", 
