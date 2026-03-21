@@ -3,12 +3,18 @@ import pdfplumber
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
-from chunk import chunk_text
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 
 load_dotenv()
+
+# function to chunk the text into smaller pieces
+def chunk_text(text, chunk_size=500):
+    chunks = []
+    for i in range(0, len(text), chunk_size):
+        chunks.append(text[i:i+chunk_size])
+    return chunks
 
 # load the model acvoid re-loading the model every time
 @st.cache_resource
@@ -56,10 +62,6 @@ if question:
 
 
 if question and text:
-    # chunking operation
-    # chunks = chunk_text(text)
-    # embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    # chunk_embeddings = embed_model.encode(chunks)
     chunks, chunk_embeddings = process_pdf(text)
 
     dimension = chunk_embeddings.shape[1]
@@ -78,7 +80,6 @@ if question and text:
     {question}
     """
     response = client.chat.completions.create(
-    # model="Qwen/Qwen3.5-9B:together",
     model="Qwen/Qwen2.5-7B-Instruct",
     messages=[
         {
