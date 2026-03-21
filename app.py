@@ -29,6 +29,24 @@ def process_pdf(text):
     embeddings = embed_model.encode(chunks)
     return chunks, embeddings
 
+@st.cache_data
+def extract_text_from_pdf(file):
+    # use padfplumber to read the pdf
+    with pdfplumber.open(file) as pdf:
+        all_text = ""
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                all_text += page_text
+    return all_text
+
+@st.cache_resource
+def create_faiss_index(embeddings):
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(np.array(embeddings))
+    return index
+
 client = OpenAI(
     api_key=os.getenv("HUGGING_FACE_API_KEY"),
     base_url="https://router.huggingface.co/v1"
@@ -42,14 +60,9 @@ upload_file = st.file_uploader("Upload a PDF", type="pdf")
 text = ""
 relevant_chunks = []
 if upload_file :
+    text = extract_text_from_pdf(upload_file)
     st.write("File uploaded successfully")
-    # use padfplumber to read the pdf
-    with pdfplumber.open(upload_file) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text
-                
+    
     st.write("PDF Preview:")
     st.write(text[:1000])
 
@@ -59,21 +72,16 @@ if question:
     st.write("Your question:", question)
 
 
-
-
 if question and text:
     chunks, chunk_embeddings = process_pdf(text)
+    index = create_faiss_index(chunk_embeddings)
 
-    dimension = chunk_embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(np.array(chunk_embeddings))
     question_embedding = embed_model.encode([question])
     distances, indices = index.search(np.array(question_embedding), k=3)
     relevant_chunks = [chunks[i] for i in indices[0]]
 
     prompt = f"""
     Based on the PDF content below:
-
     {' '.join(relevant_chunks)}
 
     Answer this question:
@@ -92,3 +100,9 @@ if question and text:
 
     st.write("Answer:")
     st.write(answer)
+    # display the relevant chunks
+    with st.expander("View Source"):
+        for i in indices[0]:
+            st.write(f"Chunk {i}")
+            st.write(chunks[i])
+            st.write("---")
